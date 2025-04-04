@@ -37,8 +37,7 @@ DATA_MAPPING_REGEX_PATTERN = r'\${data\.(.*?)}'
 QUERY_KEY = "query"
 CONTEXT_KEY = "context"
 RESPONSE_KEY = "response"
-GENERATED_RESPONSE_KEY = "generated_response"
-GENERATED_RESPONSE_MAPPING = f"${{data.{GENERATED_RESPONSE_KEY}}}"
+GENERATED_RESPONSE_SUFFIX = "generated_"
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -191,7 +190,9 @@ def apply_target_on_data(data, model_target, data_mapping):
         query = mapped_row.get(QUERY_KEY, "")
         context = mapped_row.get(CONTEXT_KEY, "")
         response = model_target.generate_response(query=query, context=context)
-        df.loc[index, GENERATED_RESPONSE_KEY] = response
+        given_response_key = mapped_row.get(RESPONSE_KEY, RESPONSE_KEY)
+        new_response_key = GENERATED_RESPONSE_SUFFIX + given_response_key
+        df.loc[index, new_response_key] = response
 
     output_dir = data.replace(INPUT_EVAL_DATA_DIR, OUTPUT_EVAL_DATA_DIR)
     os.makedirs(os.path.dirname(output_dir), exist_ok=True)
@@ -201,10 +202,10 @@ def apply_target_on_data(data, model_target, data_mapping):
     df.to_json(output_file, orient="records", lines=True)
     logger.info(f"Saved updated DataFrame to {output_file}")
 
-    return output_file
+    return output_file, new_response_key
 
 
-def update_evaluator_config_mapping_for_generated_response(command_line_args, evaluator_config):
+def update_evaluator_config_mapping_for_generated_response(command_line_args, evaluator_config, new_response_mapping):
     """Ensure 'response' key exists in 'column_mapping' and update it."""
     for evaluator_name, config in evaluator_config.items():
         if "column_mapping" not in config:
@@ -229,9 +230,10 @@ def run_evaluation(command_line_args, evaluators, evaluator_config, model_target
     data = command_line_args.eval_data
     if model_target:
         logger.info("Applying target on data")
-        data = apply_target_on_data(data=data, model_target=model_target, data_mapping=data_mapping)
+        data, new_response_key = apply_target_on_data(data=data, model_target=model_target, data_mapping=data_mapping)
         logger.info("Updating evaluator config for generated_response data mapping")
-        evaluator_config = update_evaluator_config_mapping_for_generated_response(command_line_args, evaluator_config)
+        new_response_mapping = f"${{data.{new_response_key}}}"
+        evaluator_config = update_evaluator_config_mapping_for_generated_response(command_line_args, evaluator_config, new_response_mapping)
 
     logger.info(f"Evaluation Data: {data}")
     logger.info(f"With the evaluator config {evaluator_config}")
